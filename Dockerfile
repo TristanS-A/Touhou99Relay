@@ -1,4 +1,11 @@
 ﻿FROM mcr.microsoft.com/dotnet/runtime:9.0 AS base
+
+# Install native dependencies for GameNetworkingSockets
+RUN apt-get update && apt-get install -y \
+    libprotobuf10 \
+    libssl3 \
+    && rm -rf /var/lib/apt/lists/*
+
 USER $APP_UID
 WORKDIR /app
 

@@ -14,7 +14,7 @@ class Touhou99Relay
         private static NetworkingSockets? server;
         private static NetworkingUtils utils = new NetworkingUtils();
         private static uint listenSocket;
-        private const ushort SERVER_PORT = 5000;
+        private const ushort SERVER_PORT = 50295;
 
         // Connection tracking
         private static Dictionary<uint, ClientConnection> connectedClients = new();
