@@ -2,10 +2,13 @@
 
 # Install native dependencies for GameNetworkingSockets
 RUN apt-get update && apt-get install -y \
-    libprotobuf23 \
+    libprotobuf-dev \
     libssl3 \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
+
+# Set library path
+ENV LD_LIBRARY_PATH="/usr/lib:$LD_LIBRARY_PATH"
 
 USER $APP_UID
 WORKDIR /app
