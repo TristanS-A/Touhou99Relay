@@ -1,0 +1,8 @@
+services:
+  touhou99relay:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "50295:50295"
+    restart: unless-stopped
