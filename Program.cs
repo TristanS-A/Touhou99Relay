@@ -69,11 +69,7 @@ class Touhou99Relay
         {
             if (type == DebugType.Everything)
             {
-                // Optional: Only log important messages
-                if (message.Contains("connection") || message.Contains("error"))
-                {
-                    Console.WriteLine($"[DEBUG {type}] {message}");
-                }
+                Console.WriteLine($"[DEBUG {type}] {message}");
             }
         };
         
