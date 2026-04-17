@@ -65,19 +65,21 @@ class Touhou99Relay
         Console.WriteLine($"Relay server listening on port {SERVER_PORT}");
 
         // Set up debug callback
-        DebugCallback debugCallback = (DebugType type, string message) =>
-        {
-            if (type == DebugType.Everything)
-            {
-                // Optional: Only log important messages
-                if (message.Contains("connection") || message.Contains("error"))
-                {
-                    Console.WriteLine($"[DEBUG {type}] {message}");
-                }
-            }
-        };
-
-        utils.SetDebugCallback(DebugType.Everything, debugCallback);
+        // DebugCallback debugCallback = (DebugType type, string message) =>
+        // {
+        //     if (type == DebugType.Everything)
+        //     {
+        //         // Optional: Only log important messages
+        //         if (message.Contains("connection") || message.Contains("error"))
+        //         {
+        //             Console.WriteLine($"[DEBUG {type}] {message}");
+        //         }
+        //     }
+        // };
+        //
+        // utils.SetDebugCallback(DebugType.Everything, debugCallback);
+        
+        SetUpCallbacks();
     }
 
     static void RunMainLoop()
@@ -103,13 +105,15 @@ class Touhou99Relay
         // Poll for incoming connection requests
         while (true)
         {
-            uint remoteAddress = 0;
-            Result result = server.AcceptConnection(remoteAddress);
+            // uint remoteAddress = 0;
+            // Result result = server.AcceptConnection(remoteAddress);
+            //
+            // if (result != Result.OK)
+            //     break; // No more pending connections
+            
+            server.RunCallbacks();
 
-            if (result != Result.OK)
-                break; // No more pending connections
-
-            HandleNewConnection(remoteAddress, remoteAddress);
+            //HandleNewConnection(remoteAddress, remoteAddress);
         }
 
         // Process messages from all connected clients
@@ -144,6 +148,35 @@ class Touhou99Relay
 
         // Send welcome message to client
         SendMessageToClient(connectionId, "WELCOME");
+    }
+
+    static void SetUpCallbacks()
+    {
+        // Define the status callback to handle state changes
+        StatusCallback status = (ref StatusInfo info) =>
+        {
+            switch (info.connectionInfo.state)
+            {
+                case ConnectionState.Connecting:
+                    // This is where you accept the incoming connection
+                    server.AcceptConnection(info.connection);
+                    Console.WriteLine("Accepting connection from " + info.connectionInfo.address.GetIP());
+                    break;
+
+                case ConnectionState.Connected:
+                    Console.WriteLine("Client successfully connected - ID: " + info.connection);
+                    break;
+
+                case ConnectionState.ClosedByPeer:
+                case ConnectionState.ProblemDetectedLocally:
+                    server.CloseConnection(info.connection);
+                    Console.WriteLine("Client disconnected.");
+                    break;
+            }
+        };
+        
+        // Register the callback with the networking library
+        utils.SetStatusCallback(status);
     }
 
     static void ProcessMessagesFromClient(uint clientId)
