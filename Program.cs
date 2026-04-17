@@ -79,7 +79,7 @@ class Touhou99Relay
         
         // Set up the listen address
         Address address = new();
-        address.SetAddress("65.183.141.222", SERVER_PORT);
+        address.SetAddress("0.0.0.0", SERVER_PORT);
 
         // Create listen socket
         listenSocket = server.CreateListenSocket(ref address);
@@ -113,7 +113,7 @@ class Touhou99Relay
 
         Address address = new Address();
 
-        address.SetAddress("65.183.141.222", SERVER_PORT);
+        address.SetAddress("127.0.0.1", SERVER_PORT);
 
         client.Connect(ref address);
     }
