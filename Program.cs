@@ -12,6 +12,7 @@ using Valve.Sockets;
 class Touhou99Relay
     {
         private static NetworkingSockets? server;
+        private static NetworkingSockets? client;
         private static NetworkingUtils utils = new NetworkingUtils();
         private static uint listenSocket;
         private const ushort SERVER_PORT = 50295;
@@ -49,6 +50,33 @@ class Touhou99Relay
         // Create the server socket
         server = new NetworkingSockets();
 
+        // Define the status callback to handle state changes
+        StatusCallback status = (ref StatusInfo info) =>
+        {
+            Console.WriteLine("Status: " + info.connectionInfo.state);
+            switch (info.connectionInfo.state)
+            {
+                case ConnectionState.Connecting:
+                    // This is where you accept the incoming connection
+                    server.AcceptConnection(info.connection);
+                    Console.WriteLine("Accepting connection from " + info.connectionInfo.address.GetIP());
+                    break;
+
+                case ConnectionState.Connected:
+                    Console.WriteLine("Client successfully connected - ID: " + info.connection);
+                    break;
+
+                case ConnectionState.ClosedByPeer:
+                case ConnectionState.ProblemDetectedLocally:
+                    server.CloseConnection(info.connection);
+                    Console.WriteLine("Client disconnected.");
+                    break;
+            }
+        };
+        
+        // Register the callback with the networking library
+        utils.SetStatusCallback(status);
+        
         // Set up the listen address
         Address address = new();
         address.SetAddress("65.183.141.222", SERVER_PORT);
@@ -75,7 +103,19 @@ class Touhou99Relay
         
         utils.SetDebugCallback(DebugType.Everything, debugCallback);
         
-        SetUpCallbacks();
+        TestClientJoin();
+        //SetUpCallbacks();
+    }
+
+    static void TestClientJoin()
+    {
+        client = new NetworkingSockets();
+
+        Address address = new Address();
+
+        address.SetAddress("65.183.141.222", SERVER_PORT);
+
+        client.Connect(ref address);
     }
 
     static void RunMainLoop()
@@ -107,6 +147,7 @@ class Touhou99Relay
             // if (result != Result.OK)
             //     break; // No more pending connections
             //Console.WriteLine("Running Callbacks");
+
             server.RunCallbacks();
 
             //HandleNewConnection(remoteAddress, remoteAddress);
