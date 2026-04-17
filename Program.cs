@@ -106,7 +106,7 @@ class Touhou99Relay
             //
             // if (result != Result.OK)
             //     break; // No more pending connections
-            Console.WriteLine("Running Callbacks");
+            //Console.WriteLine("Running Callbacks");
             server.RunCallbacks();
 
             //HandleNewConnection(remoteAddress, remoteAddress);
