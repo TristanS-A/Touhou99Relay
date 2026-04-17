@@ -51,7 +51,7 @@ class Touhou99Relay
 
         // Set up the listen address
         Address address = new();
-        address.SetAddress("0.0.0.0", SERVER_PORT);
+        address.SetAddress("65.183.141.222", SERVER_PORT);
 
         // Create listen socket
         listenSocket = server.CreateListenSocket(ref address);
@@ -62,22 +62,22 @@ class Touhou99Relay
             return;
         }
 
-        Console.WriteLine($"Relay server listening on port {SERVER_PORT}");
+        Console.WriteLine($"Relay server listening on the port {SERVER_PORT}");
 
         // Set up debug callback
-        // DebugCallback debugCallback = (DebugType type, string message) =>
-        // {
-        //     if (type == DebugType.Everything)
-        //     {
-        //         // Optional: Only log important messages
-        //         if (message.Contains("connection") || message.Contains("error"))
-        //         {
-        //             Console.WriteLine($"[DEBUG {type}] {message}");
-        //         }
-        //     }
-        // };
-        //
-        // utils.SetDebugCallback(DebugType.Everything, debugCallback);
+        DebugCallback debugCallback = (DebugType type, string message) =>
+        {
+            if (type == DebugType.Everything)
+            {
+                // Optional: Only log important messages
+                if (message.Contains("connection") || message.Contains("error"))
+                {
+                    Console.WriteLine($"[DEBUG {type}] {message}");
+                }
+            }
+        };
+        
+        utils.SetDebugCallback(DebugType.Everything, debugCallback);
         
         SetUpCallbacks();
     }
@@ -155,6 +155,7 @@ class Touhou99Relay
         // Define the status callback to handle state changes
         StatusCallback status = (ref StatusInfo info) =>
         {
+            Console.WriteLine("Status: " + info.connectionInfo.state);
             switch (info.connectionInfo.state)
             {
                 case ConnectionState.Connecting:
