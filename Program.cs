@@ -113,7 +113,7 @@ class Touhou99Relay
 
         Address address = new Address();
 
-        address.SetAddress("127.0.0.1", SERVER_PORT);
+        address.SetAddress("65.183.141.222", SERVER_PORT);
 
         client.Connect(ref address);
     }
@@ -193,6 +193,7 @@ class Touhou99Relay
         StatusCallback status = (ref StatusInfo info) =>
         {
             Console.WriteLine("Status: " + info.connectionInfo.state);
+            Console.WriteLine("Accepting connection from " + info.connectionInfo.address.GetIP());
             switch (info.connectionInfo.state)
             {
                 case ConnectionState.Connecting:
