@@ -54,11 +54,11 @@ class Touhou99Relay
         StatusCallback status = (ref StatusInfo info) =>
         {
             Console.WriteLine("Status: " + info.connectionInfo.state);
+            server.AcceptConnection(info.connection);
             switch (info.connectionInfo.state)
             {
                 case ConnectionState.Connecting:
                     // This is where you accept the incoming connection
-                    server.AcceptConnection(info.connection);
                     Console.WriteLine("Accepting connection from " + info.connectionInfo.address.GetIP());
                     break;
 
@@ -169,7 +169,7 @@ class Touhou99Relay
     static void HandleNewConnection(uint connectionId, uint remoteAddress)
     {
         Address addr = new();
-        addr.SetAddress("127.0.0.1", SERVER_PORT); // Default address
+        addr.SetAddress("0.0.0.0", SERVER_PORT); // Default address
 
         var clientConnection = new ClientConnection
         {
