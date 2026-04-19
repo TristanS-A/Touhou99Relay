@@ -54,9 +54,13 @@ class Touhou99Relay
         StatusCallback status = (ref StatusInfo info) =>
         {
             Console.WriteLine("Status: " + info.connectionInfo.state);
-            server.AcceptConnection(info.connection);
             switch (info.connectionInfo.state)
             {
+                case ConnectionState.None:
+                    Console.WriteLine("Connection is None");
+                    server.AcceptConnection(info.connection);
+                    // No action needed
+                    break;
                 case ConnectionState.Connecting:
                     // This is where you accept the incoming connection
                     Console.WriteLine("Accepting connection from " + info.connectionInfo.address.GetIP());
