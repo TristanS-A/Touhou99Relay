@@ -56,6 +56,7 @@ class Touhou99Relay
         StatusCallback status = (ref StatusInfo info) => {
             switch (info.connectionInfo.state) {
                 case ConnectionState.None:
+                    Console.WriteLine("Something was received " + info.connectionInfo.state);
                     break;
 
                 case ConnectionState.Connecting:
@@ -80,7 +81,7 @@ class Touhou99Relay
 
         Address address = new Address();
 
-        address.SetAddress("0.0.0.0", SERVER_PORT);
+        address.SetAddress("65.183.141.222", SERVER_PORT);
 
         uint listenSocket = server.CreateListenSocket(ref address);
 
@@ -134,7 +135,7 @@ class Touhou99Relay
 
         Address address = new Address();
 
-        address.SetAddress("127.0.0.1", SERVER_PORT);
+        address.SetAddress("65.183.141.222", SERVER_PORT);
 
         connection = client.Connect(ref address);
     }
