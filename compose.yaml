@@ -4,5 +4,5 @@ services:
       context: .
       dockerfile: Dockerfile
     ports:
-      - "50295:50295/udp"
+      - "8095:8095/udp"
     restart: unless-stopped

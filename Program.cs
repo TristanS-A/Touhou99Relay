@@ -13,9 +13,10 @@ class Touhou99Relay
     {
         private static NetworkingSockets? server;
         private static NetworkingSockets? client;
-        private static NetworkingUtils utils = new NetworkingUtils();
+        private static NetworkingUtils serverUtils = new NetworkingUtils();
+        //private static NetworkingUtils clientUtils = new NetworkingUtils();
         private static uint listenSocket;
-        private const ushort SERVER_PORT = 50295;
+        private const ushort SERVER_PORT = 8095;
 
         // Connection tracking
         private static Dictionary<uint, ClientConnection> connectedClients = new();
@@ -49,44 +50,39 @@ class Touhou99Relay
 
         // Create the server socket
         server = new NetworkingSockets();
+        uint pollGroup = server.CreatePollGroup();
 
         // Define the status callback to handle state changes
-        StatusCallback status = (ref StatusInfo info) =>
-        {
-            Console.WriteLine("Status: " + info.connectionInfo.state);
-            switch (info.connectionInfo.state)
-            {
+        StatusCallback status = (ref StatusInfo info) => {
+            switch (info.connectionInfo.state) {
                 case ConnectionState.None:
-                    Console.WriteLine("Connection is None");
-                    server.AcceptConnection(info.connection);
-                    // No action needed
                     break;
+
                 case ConnectionState.Connecting:
-                    // This is where you accept the incoming connection
                     Console.WriteLine("Accepting connection from " + info.connectionInfo.address.GetIP());
+                    server.AcceptConnection(info.connection);
+                    server.SetConnectionPollGroup(pollGroup, info.connection);
                     break;
 
                 case ConnectionState.Connected:
-                    Console.WriteLine("Client successfully connected - ID: " + info.connection);
+                    Console.WriteLine("Client connected - ID: " + info.connection + ", IP: " + info.connectionInfo.address.GetIP());
                     break;
 
                 case ConnectionState.ClosedByPeer:
                 case ConnectionState.ProblemDetectedLocally:
                     server.CloseConnection(info.connection);
-                    Console.WriteLine("Client disconnected.");
+                    Console.WriteLine("Client disconnected - ID: " + info.connection + ", IP: " + info.connectionInfo.address.GetIP());
                     break;
             }
         };
         
-        // Register the callback with the networking library
-        utils.SetStatusCallback(status);
-        
-        // Set up the listen address
-        Address address = new();
+        serverUtils.SetStatusCallback(status);
+
+        Address address = new Address();
+
         address.SetAddress("0.0.0.0", SERVER_PORT);
 
-        // Create listen socket
-        listenSocket = server.CreateListenSocket(ref address);
+        uint listenSocket = server.CreateListenSocket(ref address);
 
         if (listenSocket == uint.MaxValue)
         {
@@ -105,7 +101,7 @@ class Touhou99Relay
             }
         };
         
-        utils.SetDebugCallback(DebugType.Everything, debugCallback);
+        //utils.SetDebugCallback(DebugType.Everything, debugCallback);
         
         TestClientJoin();
         //SetUpCallbacks();
@@ -115,11 +111,32 @@ class Touhou99Relay
     {
         client = new NetworkingSockets();
 
+        uint connection = 0;
+
+        StatusCallback status = (ref StatusInfo info) => {
+            switch (info.connectionInfo.state) {
+                case ConnectionState.None:
+                    break;
+
+                case ConnectionState.Connected:
+                    Console.WriteLine("Client connected to server - ID: " + connection);
+                    break;
+
+                case ConnectionState.ClosedByPeer:
+                case ConnectionState.ProblemDetectedLocally:
+                    client.CloseConnection(connection);
+                    Console.WriteLine("Client disconnected from server");
+                    break;
+            }
+        };
+
+        //clientUtils.SetStatusCallback(status);
+
         Address address = new Address();
 
         address.SetAddress("127.0.0.1", SERVER_PORT);
 
-        client.Connect(ref address);
+        connection = client.Connect(ref address);
     }
 
     static void RunMainLoop()
@@ -153,6 +170,7 @@ class Touhou99Relay
             //Console.WriteLine("Running Callbacks");
 
             server.RunCallbacks();
+            client.RunCallbacks();
 
             //HandleNewConnection(remoteAddress, remoteAddress);
         }
@@ -219,7 +237,7 @@ class Touhou99Relay
         };
         
         // Register the callback with the networking library
-        utils.SetStatusCallback(status);
+       // utils.SetStatusCallback(status);
     }
 
     static void ProcessMessagesFromClient(uint clientId)
