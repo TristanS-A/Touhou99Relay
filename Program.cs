@@ -144,13 +144,10 @@ class Touhou99Relay
         Console.WriteLine("Entering main relay loop...\n");
         bool running = true;
 
-        while (running)
+        if (running)
         {
             // Process incoming connections and messages
             ProcessNetworkEvents();
-
-            // Small delay to prevent CPU spinning
-            System.Threading.Thread.Sleep(16); // ~60 FPS
         }
     }
 
@@ -171,7 +168,9 @@ class Touhou99Relay
 
             server.RunCallbacks();
             client.RunCallbacks();
-
+            
+            // Small delay to prevent CPU spinning
+            System.Threading.Thread.Sleep(16); // ~60 FPS
             //HandleNewConnection(remoteAddress, remoteAddress);
         }
 
