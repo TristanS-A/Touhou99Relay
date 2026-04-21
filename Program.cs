@@ -15,6 +15,8 @@ class Touhou99Relay
         private static NetworkingSockets? client;
         private static NetworkingUtils serverUtils = new NetworkingUtils();
         private static NetworkingUtils clientUtils = new NetworkingUtils();
+        private static StatusCallback? serverStatusCallback;
+        private static StatusCallback? clientStatusCallback;
         private static uint listenSocket;
         private const ushort SERVER_PORT = 8095;
         private static readonly bool enableSelfTest = IsSelfTestEnabled();
@@ -84,9 +86,9 @@ class Touhou99Relay
         uint pollGroup = activeServer.CreatePollGroup();
 
         // Define the status callback to handle state changes
-        StatusCallback status = (ref StatusInfo info) => {
+        serverStatusCallback = (ref StatusInfo info) => {
             string ipAddress = info.connectionInfo.address.GetIP();
-            Console.WriteLine($"[STATUS][SERVER] Connection {info.connection}, IP: {ipAddress}, State: {info.connectionInfo.state}");
+            Console.WriteLine($"[STATUS][SERVER] Connection {info.connection}, IP: {ipAddress}, State: {info.connectionInfo.state}, EndReason: {info.connectionInfo.endReason}, Debug: {info.connectionInfo.endDebug}");
 
             switch (info.connectionInfo.state) {
                 case ConnectionState.None:
@@ -112,10 +114,14 @@ class Touhou99Relay
                     Console.WriteLine("Client disconnected - ID: " + info.connection + ", IP: " + ipAddress);
                     HandleClientDisconnect(info.connection, closeConnection: false);
                     break;
+
+                default:
+                    Console.WriteLine("[STATUS][SERVER] Received an unknown connection state. This usually indicates callback lifetime or native/managed interop issues, not a normal client state.");
+                    break;
             }
         };
         
-        serverUtils.SetStatusCallback(status);
+        serverUtils.SetStatusCallback(serverStatusCallback);
 
         Address address = new Address();
 
@@ -152,9 +158,9 @@ class Touhou99Relay
 
         uint connection = 0;
 
-        StatusCallback status = (ref StatusInfo info) => {
+        clientStatusCallback = (ref StatusInfo info) => {
             string ipAddress = info.connectionInfo.address.GetIP();
-            Console.WriteLine($"[STATUS][SELF-TEST] Connection {info.connection}, IP: {ipAddress}, State: {info.connectionInfo.state}");
+            Console.WriteLine($"[STATUS][SELF-TEST] Connection {info.connection}, IP: {ipAddress}, State: {info.connectionInfo.state}, EndReason: {info.connectionInfo.endReason}, Debug: {info.connectionInfo.endDebug}");
 
             switch (info.connectionInfo.state) {
                 case ConnectionState.None:
@@ -169,10 +175,14 @@ class Touhou99Relay
                     activeClient.CloseConnection(connection);
                     Console.WriteLine("Self-test client disconnected from server");
                     break;
+
+                default:
+                    Console.WriteLine("[STATUS][SELF-TEST] Received an unknown connection state. This points to callback lifetime or native/managed interop problems.");
+                    break;
             }
         };
 
-        clientUtils.SetStatusCallback(status);
+        clientUtils.SetStatusCallback(clientStatusCallback);
 
         Address address = new Address();
 
