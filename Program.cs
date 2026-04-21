@@ -14,9 +14,10 @@ class Touhou99Relay
         private static NetworkingSockets? server;
         private static NetworkingSockets? client;
         private static NetworkingUtils serverUtils = new NetworkingUtils();
-        //private static NetworkingUtils clientUtils = new NetworkingUtils();
+        private static NetworkingUtils clientUtils = new NetworkingUtils();
         private static uint listenSocket;
         private const ushort SERVER_PORT = 8095;
+        private static readonly bool enableSelfTest = IsSelfTestEnabled();
 
         // Connection tracking
         private static Dictionary<uint, ClientConnection> connectedClients = new();
@@ -39,40 +40,77 @@ class Touhou99Relay
         Console.WriteLine("=== Touhou99 Relay Server Started ===");
         Console.WriteLine($"Listening on port {SERVER_PORT}");
 
-        RunServerSetUp();
+        if (!RunServerSetUp())
+        {
+            Console.WriteLine("Startup aborted because the relay server failed to bind its listen socket.");
+            return;
+        }
+
         RunMainLoop();
     }
 
-    static void RunServerSetUp()
+    static bool IsSelfTestEnabled()
+    {
+        string? rawValue = Environment.GetEnvironmentVariable("TOUHOU99RELAY_ENABLE_SELF_TEST");
+        return string.Equals(rawValue, "1", StringComparison.OrdinalIgnoreCase)
+            || (bool.TryParse(rawValue, out bool enabled) && enabled);
+    }
+
+    static bool RunServerSetUp()
     {
         // Initialize the Valve Sockets library
-        Valve.Sockets.Library.Initialize();
+        try
+        {
+            Valve.Sockets.Library.Initialize();
+        }
+        catch (DllNotFoundException ex)
+        {
+            Console.WriteLine("[STARTUP ERROR] Failed to load the GameNetworkingSockets native library.");
+            Console.WriteLine($"[STARTUP ERROR] {ex.Message}");
+            Console.WriteLine("[STARTUP ERROR] If you are on Apple Silicon or another non-x64 environment, run the relay through Docker with linux/amd64 or install matching native libraries.");
+            return false;
+        }
+        catch (BadImageFormatException ex)
+        {
+            Console.WriteLine("[STARTUP ERROR] GameNetworkingSockets was found, but the native library architecture is incompatible with the current runtime.");
+            Console.WriteLine($"[STARTUP ERROR] {ex.Message}");
+            Console.WriteLine("[STARTUP ERROR] Use an x64-compatible environment for Valve.Sockets, or run the Docker image with linux/amd64.");
+            return false;
+        }
 
         // Create the server socket
         server = new NetworkingSockets();
-        uint pollGroup = server.CreatePollGroup();
+        NetworkingSockets activeServer = server;
+        uint pollGroup = activeServer.CreatePollGroup();
 
         // Define the status callback to handle state changes
         StatusCallback status = (ref StatusInfo info) => {
+            string ipAddress = info.connectionInfo.address.GetIP();
+            Console.WriteLine($"[STATUS][SERVER] Connection {info.connection}, IP: {ipAddress}, State: {info.connectionInfo.state}");
+
             switch (info.connectionInfo.state) {
                 case ConnectionState.None:
-                    Console.WriteLine("Something was received " + info.connectionInfo.state);
+                    Console.WriteLine("[STATUS][SERVER] Received ConnectionState.None - this usually means an incomplete handshake or self-test traffic.");
                     break;
 
                 case ConnectionState.Connecting:
-                    Console.WriteLine("Accepting connection from " + info.connectionInfo.address.GetIP());
-                    server.AcceptConnection(info.connection);
-                    server.SetConnectionPollGroup(pollGroup, info.connection);
+                    Console.WriteLine("[CONNECT] Accepting connection from " + ipAddress);
+                    activeServer.AcceptConnection(info.connection);
+                    activeServer.SetConnectionPollGroup(pollGroup, info.connection);
+                    TrackConnection(info.connection, ipAddress, ConnectionState.Connecting);
                     break;
 
                 case ConnectionState.Connected:
-                    Console.WriteLine("Client connected - ID: " + info.connection + ", IP: " + info.connectionInfo.address.GetIP());
+                    TrackConnection(info.connection, ipAddress, ConnectionState.Connected);
+                    Console.WriteLine("Client connected - ID: " + info.connection + ", IP: " + ipAddress);
                     break;
 
                 case ConnectionState.ClosedByPeer:
                 case ConnectionState.ProblemDetectedLocally:
-                    server.CloseConnection(info.connection);
-                    Console.WriteLine("Client disconnected - ID: " + info.connection + ", IP: " + info.connectionInfo.address.GetIP());
+                    TrackConnection(info.connection, ipAddress, info.connectionInfo.state);
+                    activeServer.CloseConnection(info.connection);
+                    Console.WriteLine("Client disconnected - ID: " + info.connection + ", IP: " + ipAddress);
+                    HandleClientDisconnect(info.connection, closeConnection: false);
                     break;
             }
         };
@@ -83,61 +121,65 @@ class Touhou99Relay
 
         address.SetAddress("0.0.0.0", SERVER_PORT);
 
-        uint listenSocket = server.CreateListenSocket(ref address);
+        listenSocket = activeServer.CreateListenSocket(ref address);
 
         if (listenSocket == uint.MaxValue)
         {
             Console.WriteLine("ERROR: Failed to create listen socket!");
-            return;
+            return false;
         }
 
-        Console.WriteLine($"Relay server listening on the port {SERVER_PORT}");
+        Console.WriteLine($"Relay server listening on the port {SERVER_PORT} (listen socket {listenSocket})");
 
-        // Set up debug callback
-        DebugCallback debugCallback = (DebugType type, string message) =>
+        if (enableSelfTest)
         {
-            if (type == DebugType.Everything)
-            {
-                Console.WriteLine($"[DEBUG {type}] {message}");
-            }
-        };
-        
-        //utils.SetDebugCallback(DebugType.Everything, debugCallback);
-        
-        TestClientJoin();
+            Console.WriteLine($"[SELF-TEST] Enabled. Creating a loopback client against 127.0.0.1:{SERVER_PORT}.");
+            TestClientJoin();
+        }
+        else
+        {
+            Console.WriteLine("[SELF-TEST] Disabled. Set TOUHOU99RELAY_ENABLE_SELF_TEST=1 to run the local loopback client probe.");
+        }
+
         //SetUpCallbacks();
+        return true;
     }
 
     static void TestClientJoin()
     {
         client = new NetworkingSockets();
+        NetworkingSockets activeClient = client;
 
         uint connection = 0;
 
         StatusCallback status = (ref StatusInfo info) => {
+            string ipAddress = info.connectionInfo.address.GetIP();
+            Console.WriteLine($"[STATUS][SELF-TEST] Connection {info.connection}, IP: {ipAddress}, State: {info.connectionInfo.state}");
+
             switch (info.connectionInfo.state) {
                 case ConnectionState.None:
                     break;
 
                 case ConnectionState.Connected:
-                    Console.WriteLine("Client connected to server - ID: " + connection);
+                    Console.WriteLine("Self-test client connected to server - ID: " + connection);
                     break;
 
                 case ConnectionState.ClosedByPeer:
                 case ConnectionState.ProblemDetectedLocally:
-                    client.CloseConnection(connection);
-                    Console.WriteLine("Client disconnected from server");
+                    activeClient.CloseConnection(connection);
+                    Console.WriteLine("Self-test client disconnected from server");
                     break;
             }
         };
 
-        //clientUtils.SetStatusCallback(status);
+        clientUtils.SetStatusCallback(status);
 
         Address address = new Address();
 
-        address.SetAddress("0.0.0.0", SERVER_PORT);
+        address.SetAddress("127.0.0.1", SERVER_PORT);
 
-        connection = client.Connect(ref address);
+        connection = activeClient.Connect(ref address);
+        Console.WriteLine($"[SELF-TEST] Started loopback connection attempt {connection} to 127.0.0.1:{SERVER_PORT}");
     }
 
     static void RunMainLoop()
@@ -168,45 +210,64 @@ class Touhou99Relay
             //Console.WriteLine("Running Callbacks");
 
             server.RunCallbacks();
-            client.RunCallbacks();
+
+            if (client != null)
+            {
+                client.RunCallbacks();
+            }
+
+            // Process messages from all connected clients
+            foreach (var clientId in connectedClients.Keys.ToList())
+            {
+                ProcessMessagesFromClient(clientId);
+            }
+
+            // Poll for connection status changes
+            foreach (var clientId in connectedClients.Keys.ToList())
+            {
+                ProcessConnectionState(clientId);
+            }
             
             // Small delay to prevent CPU spinning
             System.Threading.Thread.Sleep(16); // ~60 FPS
             //HandleNewConnection(remoteAddress, remoteAddress);
         }
-
-        // Process messages from all connected clients
-        foreach (var clientId in connectedClients.Keys.ToList())
-        {
-            ProcessMessagesFromClient(clientId);
-        }
-
-        // Poll for connection status changes
-        foreach (var clientId in connectedClients.Keys.ToList())
-        {
-            ProcessConnectionState(clientId);
-        }
     }
 
-    static void HandleNewConnection(uint connectionId, uint remoteAddress)
+    static void TrackConnection(uint connectionId, string ipAddress, ConnectionState state)
     {
-        Address addr = new();
-        addr.SetAddress("0.0.0.0", SERVER_PORT); // Default address
+        bool isNewConnection = !connectedClients.TryGetValue(connectionId, out ClientConnection? clientConnection);
+        ConnectionState previousState = clientConnection?.State ?? ConnectionState.None;
 
-        var clientConnection = new ClientConnection
+        if (isNewConnection)
         {
-            ConnectionId = connectionId,
-            IpAddress = addr.GetIP(),
-            State = ConnectionState.Connected
-        };
+            clientConnection = new ClientConnection
+            {
+                ConnectionId = connectionId,
+                IpAddress = ipAddress,
+                State = state
+            };
 
-        connectedClients[connectionId] = clientConnection;
+            connectedClients[connectionId] = clientConnection;
 
-        Console.WriteLine($"[CONNECT] New client connected - ID: {connectionId}, IP: {clientConnection.IpAddress}");
-        Console.WriteLine($"Total connected clients: {connectedClients.Count}");
+            Console.WriteLine($"[CONNECT] New client tracked - ID: {connectionId}, IP: {ipAddress}");
+            Console.WriteLine($"Total connected clients: {connectedClients.Count}");
+        }
+        else
+        {
+            clientConnection!.IpAddress = ipAddress;
+            clientConnection.State = state;
+        }
 
-        // Send welcome message to client
-        SendMessageToClient(connectionId, "WELCOME");
+        if (previousState != state)
+        {
+            Console.WriteLine($"[STATE CHANGE] Client {connectionId}: {previousState} -> {state}");
+        }
+
+        if (previousState != ConnectionState.Connected && state == ConnectionState.Connected)
+        {
+            SendMessageToClient(connectionId, "WELCOME");
+        }
     }
 
     static void SetUpCallbacks()
@@ -214,13 +275,20 @@ class Touhou99Relay
         // Define the status callback to handle state changes
         StatusCallback status = (ref StatusInfo info) =>
         {
+            if (server == null)
+            {
+                Console.WriteLine("[ERROR] Received a server callback before the server socket was initialized.");
+                return;
+            }
+
+            NetworkingSockets activeServer = server;
             Console.WriteLine("Status: " + info.connectionInfo.state);
             Console.WriteLine("Accepting connection from " + info.connectionInfo.address.GetIP());
             switch (info.connectionInfo.state)
             {
                 case ConnectionState.Connecting:
                     // This is where you accept the incoming connection
-                    server.AcceptConnection(info.connection);
+                    activeServer.AcceptConnection(info.connection);
                     Console.WriteLine("Accepting connection from " + info.connectionInfo.address.GetIP());
                     break;
 
@@ -230,7 +298,7 @@ class Touhou99Relay
 
                 case ConnectionState.ClosedByPeer:
                 case ConnectionState.ProblemDetectedLocally:
-                    server.CloseConnection(info.connection);
+                    activeServer.CloseConnection(info.connection);
                     Console.WriteLine("Client disconnected.");
                     break;
             }
@@ -361,7 +429,7 @@ class Touhou99Relay
         }
     }
 
-    static void HandleClientDisconnect(uint clientId)
+    static void HandleClientDisconnect(uint clientId, bool closeConnection = true)
     {
         if (connectedClients.ContainsKey(clientId))
         {
@@ -379,7 +447,7 @@ class Touhou99Relay
         }
 
         // Close the connection
-        if (server != null)
+        if (closeConnection && server != null)
         {
             server.CloseConnection(clientId, 0, "Client disconnected", true);
         }
