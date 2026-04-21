@@ -135,7 +135,7 @@ class Touhou99Relay
 
         Address address = new Address();
 
-        address.SetAddress("65.183.141.222", SERVER_PORT);
+        address.SetAddress("0.0.0.0", SERVER_PORT);
 
         connection = client.Connect(ref address);
     }
