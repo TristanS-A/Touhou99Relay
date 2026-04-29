@@ -128,7 +128,7 @@ class Touhou99Relay
 
         Address address = new Address();
 
-        IPAddress serverIP = new IPAddress(0);
+        // IPAddress serverIP = new IPAddress(0);
         // var host = Dns.GetHostEntry(Dns.GetHostName());
         // foreach (var ip in host.AddressList)
         // {
@@ -148,7 +148,7 @@ class Touhou99Relay
             return;
         }
 
-        Console.WriteLine($"Relay server listening on IP {serverIP.ToString()} and the port {SERVER_PORT}");
+        Console.WriteLine($"Relay server listening on IP 65.183.141.222 and the port {SERVER_PORT}");
 
         // Set up debug callback
         DebugCallback debugCallback = (DebugType type, string message) =>
