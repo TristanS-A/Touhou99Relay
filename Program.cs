@@ -1,9 +1,10 @@
 ﻿// See https://aka.ms/new-console-template for more information
 
-using System.Diagnostics;
 using System.Net;
 using System.Text;
 using Valve.Sockets;
+using System.Net.Sockets;
+using System.Runtime.InteropServices;
 
 /// <summary>
 /// Relay server for managing master client and multiple client connections
@@ -11,16 +12,62 @@ using Valve.Sockets;
 /// </summary>
 class Touhou99Relay
     {
-        private static NetworkingSockets? server;
-        private static NetworkingSockets? client;
+        private static NetworkingSockets? serverAcceptor;
+        //private static NetworkingSockets? client;
         private static NetworkingUtils serverUtils = new NetworkingUtils();
         //private static NetworkingUtils clientUtils = new NetworkingUtils();
         private static uint listenSocket;
         private const ushort SERVER_PORT = 8095;
 
+        private Dictionary<uint, uint> roomToSocket = new();
+
         // Connection tracking
         private static Dictionary<uint, ClientConnection> connectedClients = new();
-        private static uint? masterClientConnection = null;
+        private static Dictionary<uint, RoomData> roomDataMap = new();
+        
+        private const int MAX_MESSAGES = 20;
+        private static NetworkingMessage[] netMessages = new NetworkingMessage[MAX_MESSAGES];
+
+        struct RoomData
+        {
+            public uint hostConnection;
+            public List<uint> clientConnections;
+        }
+        
+        public enum PacketType
+        {
+            PLAYER_DATA,
+            REGISTER_PLAYER,
+            PLAYER_COUNT,
+            GAME_STATE,
+            STORE_PLAYER_RESULTS,
+            SEND_RESULT,
+            OFFENSIVE_BOMB_DATA,
+            OTHER_PLAYER_FINISH,
+            REGISTER_ROOM,
+            JOIN_ROOM,
+        }
+        
+        [StructLayout(LayoutKind.Sequential)]
+        public struct TypeFinder
+        {
+            public int type;
+        }
+        
+        [StructLayout(LayoutKind.Sequential)]
+        public struct RoomExtractor
+        {
+            public int type;
+            public uint roomID;
+        }
+        
+        [StructLayout(LayoutKind.Sequential)]
+        public struct RegisterPlayer
+        {
+            public int type;
+            public uint roomID;
+            public uint playerID;
+        };
 
         /// <summary>
         /// Represents a connected client
@@ -39,18 +86,18 @@ class Touhou99Relay
         Console.WriteLine("=== Touhou99 Relay Server Started ===");
         Console.WriteLine($"Listening on port {SERVER_PORT}");
 
-        RunServerSetUp();
+        SetUpServerAcceptor();
         RunMainLoop();
     }
 
-    static void RunServerSetUp()
+    static void SetUpServerAcceptor()
     {
         // Initialize the Valve Sockets library
         Valve.Sockets.Library.Initialize();
 
         // Create the server socket
-        server = new NetworkingSockets();
-        uint pollGroup = server.CreatePollGroup();
+        serverAcceptor = new NetworkingSockets();
+        uint pollGroup = serverAcceptor.CreatePollGroup();
 
         // Define the status callback to handle state changes
         StatusCallback status = (ref StatusInfo info) => {
@@ -60,18 +107,18 @@ class Touhou99Relay
                     break;
 
                 case ConnectionState.Connecting:
-                    Console.WriteLine("Accepting connection from " + info.connectionInfo.address.GetIP());
-                    server.AcceptConnection(info.connection);
-                    server.SetConnectionPollGroup(pollGroup, info.connection);
+                    Console.WriteLine("Connection incomming from " + info.connectionInfo.address.GetIP());
+                    serverAcceptor.AcceptConnection(info.connection);
                     break;
 
                 case ConnectionState.Connected:
                     Console.WriteLine("Client connected - ID: " + info.connection + ", IP: " + info.connectionInfo.address.GetIP());
+                    HandleClientConnected(info.connection);
                     break;
 
                 case ConnectionState.ClosedByPeer:
                 case ConnectionState.ProblemDetectedLocally:
-                    server.CloseConnection(info.connection);
+                    serverAcceptor.CloseConnection(info.connection);
                     Console.WriteLine("Client disconnected - ID: " + info.connection + ", IP: " + info.connectionInfo.address.GetIP());
                     break;
             }
@@ -81,9 +128,19 @@ class Touhou99Relay
 
         Address address = new Address();
 
-        address.SetAddress("65.183.141.222", SERVER_PORT);
-
-        uint listenSocket = server.CreateListenSocket(ref address);
+        IPAddress serverIP = new IPAddress(0);
+        // var host = Dns.GetHostEntry(Dns.GetHostName());
+        // foreach (var ip in host.AddressList)
+        // {
+        //     if (ip.AddressFamily == AddressFamily.InterNetwork)
+        //     {
+        //         serverIP = ip;
+        //     }
+        // }
+        
+        address.SetAddress("0.0.0.0", SERVER_PORT); 
+        
+        listenSocket = serverAcceptor.CreateListenSocket(ref address);
 
         if (listenSocket == uint.MaxValue)
         {
@@ -91,7 +148,7 @@ class Touhou99Relay
             return;
         }
 
-        Console.WriteLine($"Relay server listening on the port {SERVER_PORT}");
+        Console.WriteLine($"Relay server listening on IP {serverIP.ToString()} and the port {SERVER_PORT}");
 
         // Set up debug callback
         DebugCallback debugCallback = (DebugType type, string message) =>
@@ -104,40 +161,53 @@ class Touhou99Relay
         
         //utils.SetDebugCallback(DebugType.Everything, debugCallback);
         
-        TestClientJoin();
+        //TestClientJoin();
         //SetUpCallbacks();
     }
 
-    static void TestClientJoin()
+    // static void TestClientJoin()
+    // {
+    //     client = new NetworkingSockets();
+    //
+    //     uint connection = 0;
+    //
+    //     StatusCallback status = (ref StatusInfo info) => {
+    //         switch (info.connectionInfo.state) {
+    //             case ConnectionState.None:
+    //                 break;
+    //
+    //             case ConnectionState.Connected:
+    //                 Console.WriteLine("Client connected to server - ID: " + connection);
+    //                 break;
+    //
+    //             case ConnectionState.ClosedByPeer:
+    //             case ConnectionState.ProblemDetectedLocally:
+    //                 client.CloseConnection(connection);
+    //                 Console.WriteLine("Client disconnected from server");
+    //                 break;
+    //         }
+    //     };
+    //
+    //     //clientUtils.SetStatusCallback(status);
+    //
+    //     Address address = new Address();
+    //
+    //     address.SetAddress("65.183.141.222", SERVER_PORT);
+    //
+    //     connection = client.Connect(ref address);
+    // }
+
+    private static void HandleClientConnected(uint clientConnection)
     {
-        client = new NetworkingSockets();
-
-        uint connection = 0;
-
-        StatusCallback status = (ref StatusInfo info) => {
-            switch (info.connectionInfo.state) {
-                case ConnectionState.None:
-                    break;
-
-                case ConnectionState.Connected:
-                    Console.WriteLine("Client connected to server - ID: " + connection);
-                    break;
-
-                case ConnectionState.ClosedByPeer:
-                case ConnectionState.ProblemDetectedLocally:
-                    client.CloseConnection(connection);
-                    Console.WriteLine("Client disconnected from server");
-                    break;
-            }
-        };
-
-        //clientUtils.SetStatusCallback(status);
-
-        Address address = new Address();
-
-        address.SetAddress("65.183.141.222", SERVER_PORT);
-
-        connection = client.Connect(ref address);
+        if (!connectedClients.ContainsKey(clientConnection))
+        {
+            connectedClients[clientConnection] = new ClientConnection
+            {
+                ConnectionId = clientConnection,
+                IpAddress = "Unknown",
+                State = ConnectionState.Connected
+            };
+        }
     }
 
     static void RunMainLoop()
@@ -154,7 +224,7 @@ class Touhou99Relay
 
     static void ProcessNetworkEvents()
     {
-        if (server == null)
+        if (serverAcceptor == null)
             return;
 
         // Poll for incoming connection requests
@@ -167,247 +237,106 @@ class Touhou99Relay
             //     break; // No more pending connections
             //Console.WriteLine("Running Callbacks");
 
-            server.RunCallbacks();
-            client.RunCallbacks();
+            serverAcceptor.RunCallbacks();
+
+            ProcessMessages();
             
             // Small delay to prevent CPU spinning
             System.Threading.Thread.Sleep(16); // ~60 FPS
             //HandleNewConnection(remoteAddress, remoteAddress);
         }
-
-        // Process messages from all connected clients
-        foreach (var clientId in connectedClients.Keys.ToList())
-        {
-            ProcessMessagesFromClient(clientId);
-        }
-
-        // Poll for connection status changes
-        foreach (var clientId in connectedClients.Keys.ToList())
-        {
-            ProcessConnectionState(clientId);
-        }
     }
 
-    static void HandleNewConnection(uint connectionId, uint remoteAddress)
+    static void ProcessMessages()
     {
-        Address addr = new();
-        addr.SetAddress("0.0.0.0", SERVER_PORT); // Default address
+        MessageCallback messageCallbacks = (in NetworkingMessage netMessage) => 
+        { 
+            byte[] messageDataBuffer = new byte[netMessage.length];
+            netMessage.CopyTo(messageDataBuffer);
+            //netMessage.Destroy();
+            
+            IntPtr ptPoit = Marshal.AllocHGlobal(messageDataBuffer.Length);
+            Marshal.Copy(messageDataBuffer, 0, ptPoit, messageDataBuffer.Length);
 
-        var clientConnection = new ClientConnection
-        {
-            ConnectionId = connectionId,
-            IpAddress = addr.GetIP(),
-            State = ConnectionState.Connected
-        };
+            TypeFinder packetType = (TypeFinder)Marshal.PtrToStructure(ptPoit, typeof(TypeFinder));
 
-        connectedClients[connectionId] = clientConnection;
-
-        Console.WriteLine($"[CONNECT] New client connected - ID: {connectionId}, IP: {clientConnection.IpAddress}");
-        Console.WriteLine($"Total connected clients: {connectedClients.Count}");
-
-        // Send welcome message to client
-        SendMessageToClient(connectionId, "WELCOME");
-    }
-
-    static void SetUpCallbacks()
-    {
-        // Define the status callback to handle state changes
-        StatusCallback status = (ref StatusInfo info) =>
-        {
-            Console.WriteLine("Status: " + info.connectionInfo.state);
-            Console.WriteLine("Accepting connection from " + info.connectionInfo.address.GetIP());
-            switch (info.connectionInfo.state)
+            switch ((PacketType)packetType.type)
             {
-                case ConnectionState.Connecting:
-                    // This is where you accept the incoming connection
-                    server.AcceptConnection(info.connection);
-                    Console.WriteLine("Accepting connection from " + info.connectionInfo.address.GetIP());
+                case PacketType.REGISTER_ROOM:
+                    RoomExtractor pData = (RoomExtractor)Marshal.PtrToStructure(ptPoit, typeof(RoomExtractor));
+                    Console.WriteLine($"Room {pData.roomID} connected id: {pData.type}");
+                    roomDataMap[pData.roomID] = new RoomData { hostConnection = netMessage.connection, clientConnections = new List<uint>() };
                     break;
+                 case ((PacketType.JOIN_ROOM)):
+                    RoomExtractor packetData = (RoomExtractor)Marshal.PtrToStructure(ptPoit, typeof(RoomExtractor));
+                    Console.WriteLine($"JOINING Room {packetData.roomID} connected id: {packetData.type}");
+                     roomDataMap[packetData.roomID].clientConnections.Add(netMessage.connection);
+                     RegisterNewClientOnHostingClient(netMessage.connection, packetData.roomID);
+                     break;
+                 default:
+                    RoomExtractor roomData = (RoomExtractor)Marshal.PtrToStructure(ptPoit, typeof(RoomExtractor));
+                    Console.WriteLine($"SENDING ON Room {roomData.roomID} packet type: {roomData.type}");
+                    if (roomDataMap.ContainsKey(roomData.roomID))
+                    {
+                        if (roomDataMap[roomData.roomID].hostConnection == netMessage.connection)
+                        {
+                            Console.WriteLine($"Client Count : {roomDataMap[roomData.roomID].clientConnections.Count}");
+                            foreach (uint client in roomDataMap[roomData.roomID].clientConnections)
+                            {
+                                EchoMessage(client, messageDataBuffer);
+                            }
+                        }
+                        else
+                        {
+                            EchoMessage(roomDataMap[roomData.roomID].hostConnection, messageDataBuffer);
+                        }
+                    }
 
-                case ConnectionState.Connected:
-                    Console.WriteLine("Client successfully connected - ID: " + info.connection);
-                    break;
-
-                case ConnectionState.ClosedByPeer:
-                case ConnectionState.ProblemDetectedLocally:
-                    server.CloseConnection(info.connection);
-                    Console.WriteLine("Client disconnected.");
                     break;
             }
+            
+            Marshal.FreeHGlobal(ptPoit);
         };
         
-        // Register the callback with the networking library
-       // utils.SetStatusCallback(status);
-    }
-
-    static void ProcessMessagesFromClient(uint clientId)
-    {
-        if (server == null || !connectedClients.ContainsKey(clientId))
-            return;
-
-        IntPtr[] messageData = new IntPtr[20]; // k_nMaxMessagesPerBatch
-        MessageCallback callback = (in NetworkingMessage message) =>
+        foreach (var clientId in connectedClients.Keys)
         {
-            ProcessMessageFromClient(clientId, message);
-        };
-
-        // Poll messages  - this is a simplified approach
-        // In practice, you would use server.ReceiveMessagesOnConnection or a callback mechanism
+            serverAcceptor.ReceiveMessagesOnConnection(clientId, messageCallbacks, MAX_MESSAGES);
+        }
     }
 
-    static void ProcessMessageFromClient(uint clientId, in NetworkingMessage message)
+    private static void RegisterNewClientOnHostingClient(uint clientId, uint roomId)
+    {
+        if (!roomDataMap.ContainsKey(roomId)) { return; }
+        
+        RegisterPlayer playerData = new RegisterPlayer();
+        playerData.type = (int)PacketType.REGISTER_PLAYER;
+        playerData.playerID = clientId;
+        playerData.roomID = roomId;
+        
+        Byte[] bytes = new Byte[Marshal.SizeOf(typeof(RegisterPlayer))];
+        GCHandle pinStructure = GCHandle.Alloc(playerData, GCHandleType.Pinned);
+        try
+        {
+            Marshal.Copy(pinStructure.AddrOfPinnedObject(), bytes, 0, bytes.Length);
+        }
+        finally
+        {
+            serverAcceptor.SendMessageToConnection(roomDataMap[roomId].hostConnection, bytes);
+            serverAcceptor.SendMessageToConnection(clientId, bytes);
+        }
+        
+        pinStructure.Free();
+    }
+
+    private static void EchoMessage(uint clientToSendTo, byte[] messageData)
     {
         try
         {
-            // Get the message data - NetworkingMessage structure contains the data
-            // Extract the message payload based on the message structure
-            string messageText = $"Message from client {clientId}";
-
-            Console.WriteLine($"[MESSAGE] From client {clientId}: {messageText}");
-
-            // Handle special commands
-            if (messageText.StartsWith("MASTER:"))
-            {
-                HandleMasterCommand(clientId, messageText.Substring(7));
-            }
-            else if (messageText.StartsWith("RELAY:"))
-            {
-                HandleRelayCommand(clientId, messageText.Substring(6));
-            }
-            else
-            {
-                // Broadcast to all other clients if this is the master, or send to master if this is a client
-                RelayMessage(clientId, messageText);
-            }
+            serverAcceptor.SendMessageToConnection(clientToSendTo, messageData);
         }
-        catch (Exception ex)
+        catch (Exception e)
         {
-            Console.WriteLine($"[ERROR] Failed to process message: {ex.Message}");
-        }
-    }
-
-    static void HandleMasterCommand(uint clientId, string command)
-    {
-        Console.WriteLine($"[MASTER CMD] Client {clientId}: {command}");
-
-        // Designate this client as the master
-        if (masterClientConnection.HasValue && masterClientConnection.Value != clientId)
-        {
-            // Notify previous master
-            SendMessageToClient(masterClientConnection.Value, "STATUS:DEMOTED_FROM_MASTER");
-            connectedClients[masterClientConnection.Value].IsMaster = false;
-        }
-
-        masterClientConnection = clientId;
-        connectedClients[clientId].IsMaster = true;
-        SendMessageToClient(clientId, "STATUS:PROMOTED_TO_MASTER");
-
-        Console.WriteLine($"[INFO] Client {clientId} is now the master client");
-    }
-
-    static void HandleRelayCommand(uint clientId, string command)
-    {
-        Console.WriteLine($"[RELAY CMD] Client {clientId}: {command}");
-        // Handle relay-specific commands here
-    }
-
-    static void RelayMessage(uint fromClientId, string message)
-    {
-        if (!connectedClients.ContainsKey(fromClientId))
-            return;
-
-        string prefix = $"FROM_CLIENT_{fromClientId}:";
-        string relayMessage = prefix + message;
-
-        // If message is from a regular client, send to master
-        if (!connectedClients[fromClientId].IsMaster && masterClientConnection.HasValue)
-        {
-            SendMessageToClient(masterClientConnection.Value, relayMessage);
-        }
-        // If message is from master, broadcast to all clients
-        else if (connectedClients[fromClientId].IsMaster)
-        {
-            foreach (var clientId in connectedClients.Keys.Where(c => c != fromClientId))
-            {
-                SendMessageToClient(clientId, relayMessage);
-            }
-        }
-    }
-
-    static void ProcessConnectionState(uint clientId)
-    {
-        if (server == null || !connectedClients.ContainsKey(clientId))
-            return;
-
-        ConnectionInfo connectionInfo = new();
-        if (!server.GetConnectionInfo(clientId, ref connectionInfo))
-            return;
-
-        ConnectionState oldState = connectedClients[clientId].State;
-        ConnectionState newState = connectionInfo.state;
-
-        if (oldState != newState)
-        {
-            connectedClients[clientId].State = newState;
-            Console.WriteLine($"[STATE CHANGE] Client {clientId}: {oldState} -> {newState}");
-
-            switch (newState)
-            {
-                case ConnectionState.ClosedByPeer:
-                case ConnectionState.ProblemDetectedLocally:
-                    HandleClientDisconnect(clientId);
-                    break;
-            }
-        }
-    }
-
-    static void HandleClientDisconnect(uint clientId)
-    {
-        if (connectedClients.ContainsKey(clientId))
-        {
-            var client = connectedClients[clientId];
-            Console.WriteLine($"[DISCONNECT] Client {clientId} ({client.IpAddress}) disconnected");
-
-            if (client.IsMaster)
-            {
-                masterClientConnection = null;
-                Console.WriteLine("[INFO] Master client disconnected - waiting for new master");
-            }
-
-            connectedClients.Remove(clientId);
-            Console.WriteLine($"Total connected clients: {connectedClients.Count}");
-        }
-
-        // Close the connection
-        if (server != null)
-        {
-            server.CloseConnection(clientId, 0, "Client disconnected", true);
-        }
-    }
-
-    static void SendMessageToClient(uint clientId, string message)
-    {
-        if (server == null || !connectedClients.ContainsKey(clientId))
-            return;
-
-        try
-        {
-            byte[] data = Encoding.UTF8.GetBytes(message);
-            IntPtr ptr = System.Runtime.InteropServices.Marshal.AllocHGlobal(data.Length);
-            System.Runtime.InteropServices.Marshal.Copy(data, 0, ptr, data.Length);
-
-            Result result = server.SendMessageToConnection(clientId, ptr, (uint)data.Length, SendFlags.Reliable);
-
-            System.Runtime.InteropServices.Marshal.FreeHGlobal(ptr);
-
-            if (result != Result.OK)
-            {
-                Console.WriteLine($"[ERROR] Failed to send message to client {clientId}: {result}");
-            }
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"[ERROR] Exception sending message: {ex.Message}");
+            Console.WriteLine(e);
         }
     }
 }
