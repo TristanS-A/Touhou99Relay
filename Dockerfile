@@ -27,7 +27,7 @@ ARG BUILD_CONFIGURATION=Release
 RUN dotnet publish "./Touhou99Relay.csproj" -c $BUILD_CONFIGURATION -o /app/publish /p:UseAppHost=false
 
 FROM base AS final
-EXPOSE 8095
+EXPOSE 8095/udp
 WORKDIR /app
 COPY --from=publish /app/publish .
 ENTRYPOINT ["dotnet", "Touhou99Relay.dll"]
